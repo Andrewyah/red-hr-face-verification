@@ -1,0 +1,5 @@
+.face-light{position:absolute;top:12px;right:12px;width:14px;height:14px;border-radius:50%;background:#d69a21;box-shadow:0 0 0 4px #ffffffaa}
+.face-dialog[data-state="verified"] .face-light{background:#13875d}
+.face-dialog[data-state="verified"] .face-guide{border:3px solid #20ae76}
+.face-dialog[data-state="verified"] .face-feedback{color:#08745d;background:#e9f7f1}
+.face-dialog[data-state="failed"] .face-light{background:#a82534}

@@ -13,3 +13,4 @@ uploads/
 *.pem
 *.key
 *.log
+node_modules
