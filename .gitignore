@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+.pytest_cache/
+.venv/
+models/
+data/
+uploads/
+*.onnx
+*.pth
+*.pt
+*.pem
+*.key
+*.log
