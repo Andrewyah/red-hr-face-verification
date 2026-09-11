@@ -1,5 +1,10 @@
 # Face authentication deployment status — 2026-09-11
 
+**Later diagnostic:** `REPLAY_FINDING_2026-09-11.md` records a reproduced
+acceptance of previously recorded camera pixels by the current passive checks.
+This is an unresolved model/protocol defect, not only missing phone test results.
+The release policy remains empty; no face-only login has been activated.
+
 ## Deployed components
 
 - HR Site version 56, commit `81196087b944274f9c78732bbb7283d48b812349`:
