@@ -8,10 +8,17 @@ pinned upstream sources **at build time** and verified before every startup.
 **Status: evaluation service, not a completed passwordless login system.**
 This release never issues a Supabase session. Every inference response includes
 `authenticated: false`; `/readyz` includes `login_enabled: false`.
-There is deliberately no configuration switch to turn measurements into login.
+The deployed service has no switch to turn measurements into login.
 Authenticated employee enrollment, encrypted storage, one-use capture jobs and
 revocation are implemented. Device-specific genuine-user/spoof evaluation, active
 challenge validation and Supabase session exchange remain release gates.
+
+This branch adds a **disabled, unmerged passwordless-login draft**. It contains
+automatic camera capture, closed-set identification, a backend-only Supabase
+exchange and a ready-to-apply HR source patch. No production login policy has
+been installed or enabled. See `integration/FACE_LOGIN_DRAFT.md` for validation
+results, remaining blockers and the cutover procedure. Synthetic contract tests
+must not be used as biometric release evidence.
 
 The model weights are licensed pretrained open-source weights, not a new
 proprietary model trained on employee faces. See `THIRD_PARTY_NOTICES.md` and
@@ -158,17 +165,19 @@ and never resets capture limits. No changes are made to attendance or Auth facto
    lookalike and injected-video attacks on supported real devices. The defaults
    (cosine 0.65 / both PAD scores 0.99) are **unvalidated evaluation thresholds**.
    PAD scores are not measured false-accept rates or proof of physical presence.
-3. After those measurements support release, add a reviewed Supabase session
-   exchange that rechecks employee status and consumes a successful challenge
-   exactly once. Preserve password recovery and account controls. No
-   TOTP/Authenticator step is part of the proposed face login flow.
+3. After those measurements support release, finish integration review and
+   staging tests of the draft Supabase session exchange. It rechecks employee
+   status and consumes a successful challenge exactly once. Preserve password
+   recovery and account controls. No TOTP/Authenticator step is part of the
+   proposed face login flow.
 
 ## Tests
 
 ```sh
 .venv/bin/pip install -r requirements-test.lock
 .venv/bin/python -m pytest -q
-node --test tests/supabase-service-check.test.mjs tests/face-enrollment-edge.test.mjs
+npm ci
+npm test
 ```
 
 Tests cover signature tampering/replay/expiry, subject-bound template encryption,

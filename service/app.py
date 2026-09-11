@@ -14,6 +14,7 @@ from service.engine import FaceEngine, MODEL_VERSION
 from service.images import decode_frame, FrameRejected
 from service.security import RequestAuthenticator
 from service.templates import TemplateCodec
+from service.identify import identify
 
 MAX_BODY = 3_300_000
 
@@ -43,7 +44,7 @@ def create_app(engine=None, auth_key=None, template_key=None):
             return await call_next(request)
         if not app.state.ready:
             return JSONResponse({"error": "service_not_ready"}, status_code=503)
-        if request.method != "POST" or request.url.path not in {"/v1/enroll", "/v1/verify"}:
+        if request.method != "POST" or request.url.path not in {"/v1/enroll", "/v1/verify", "/v1/identify"}:
             return JSONResponse({"error": "not_found"}, status_code=404)
         if request.headers.get("content-type", "").split(";", 1)[0] != "application/json":
             return JSONResponse({"error": "json_required"}, status_code=415)
@@ -122,6 +123,25 @@ def create_app(engine=None, auth_key=None, template_key=None):
     @app.post("/v1/verify")
     def verify(request: Request):
         return process(request, True)
+
+    @app.post("/v1/identify")
+    def identify_capture(request: Request):
+        payload = request.state.payload
+        if not isinstance(payload, dict) or set(payload) != {"frames", "candidates"}:
+            return JSONResponse({"error": "invalid_request"}, status_code=400)
+        if not isinstance(payload["frames"], list) or len(payload["frames"]) != 3:
+            return JSONResponse({"error": "three_frames_required"}, status_code=400)
+        try:
+            images = [decode_frame(frame) for frame in payload["frames"]]
+            result = identify(app.state.engine, app.state.templates, images, payload["candidates"])
+            return {**result, "mode": "evaluation", "authenticated": False,
+                    "model_version": MODEL_VERSION}
+        except FrameRejected as exc:
+            code = str(exc)
+            return JSONResponse({"error": code, "authenticated": False},
+                                status_code=429 if code == "service_busy" else 422)
+        except Exception:
+            return JSONResponse({"error": "inference_failed", "authenticated": False}, status_code=503)
 
     return app
 

@@ -1,0 +1,196 @@
+--- a/v3/web/app.js
++++ b/v3/web/app.js
+@@ -35,7 +35,7 @@
+ async function read(section,id=null){return rpc('hr_read',{p_section:section,p_month:month(),p_employee_id:id});}
+ async function command(action,data){const key=action+JSON.stringify(data);if(!inFlight.has(key))inFlight.set(key,crypto.randomUUID());const id=inFlight.get(key);const r=await rpc('hr_command',{p_action:action,p_data:data,p_request_id:id});inFlight.delete(key);return r;}
+ async function refresh(){if(!ws)return;const fresh=await read('workspace');if(!fresh?.profile)throw new Error('No active employee profile is linked to this account.');ws=fresh;admin=null;team=null;branchIncome=null;orgData=null;await render();}
+-function setAuth(mode){currentSession=null;idle.stop();window.RedVisit.clear(reloadKey);window.HRFaceCamera?.close();$('biometricPanel').hidden=true;biometricSetupRequested=false;orgData=null;orgFormCatalog=null;stopGPS();clearPayslipURLs();geoMine=null;geoTeam=null;branchIncome=null;renderSequence++;epoch++;diagnostics=null;ws=null;admin=null;team=null;inFlight.clear();$('page').innerHTML='';$('nav').innerHTML='';$('dialogBody').innerHTML='';$('dialog').close();$('connection').textContent='Private access';authMode=mode;$('authView').hidden=false;$('appShell').hidden=true;$('settingsBtn').hidden=true;$('logoutBtn').hidden=true;
++function setAuth(mode){currentSession=null;idle.stop();window.RedVisit.clear(reloadKey);window.HRFaceCamera?.close();window.HRFaceLogin?.close();$('biometricPanel').hidden=true;biometricSetupRequested=false;orgData=null;orgFormCatalog=null;stopGPS();clearPayslipURLs();geoMine=null;geoTeam=null;branchIncome=null;renderSequence++;epoch++;diagnostics=null;ws=null;admin=null;team=null;inFlight.clear();$('page').innerHTML='';$('nav').innerHTML='';$('dialogBody').innerHTML='';$('dialog').close();$('connection').textContent='Private access';authMode=mode;$('authView').hidden=false;$('appShell').hidden=true;$('settingsBtn').hidden=true;$('logoutBtn').hidden=true;
+  let content='';
+  if(mode==='forgot')content=`<h2>Forgot password</h2><p class="muted intro">Enter your registered work email. A recovery link will be sent when the account is eligible.</p><form id="authForm">${field('Registered work email','email','email','','autocomplete="email" required')}<button class="btn primary wide" type="submit">Send recovery link</button></form><p><button class="btn link" data-action="login-page">Back to employee login</button></p><div class="lock-note">For your privacy, we do not disclose whether an email is registered.</div>`;
+  else if(mode==='reset')content=`<h2>Choose a new password</h2><p class="muted intro">${passwordRule}</p><form id="authForm">${field('New password','password','password','','minlength="8" autocomplete="new-password" required')}${field('Confirm password','confirm','password','','minlength="8" autocomplete="new-password" required')}<button type="submit" class="btn primary wide">Submit</button></form><p id="passwordSuccess" class="success-text" hidden>Your password is changed successfully</p><button class="btn link" data-action="login-page">Back to login</button>`;
+@@ -128,9 +128,18 @@
+  });}catch(error){biometricLock(false);throw error;}
+ }
+ function requestPasskeySetup(){return openFaceCamera();}
+-function signInWithPasskey(){return openFaceCamera();}
++async function signInWithPasskey(){
++ if(ws)return openFaceCamera();
++ if(biometricBusy||biometricPasswordPending)return;
++ if(!sb||!window.HRFaceLogin)throw new Error('Face login did not load. Reload this page and try again.');
++ biometricLock(true);const startEpoch=epoch;
++ try{window.HRFaceLogin.open({client:sb,config:C,
++  onDone:()=>biometricLock(false),
++  onContinue:verified=>{if(startEpoch===epoch&&verified)void guarded(()=>boot());}
++ });}catch(error){biometricLock(false);throw error;}
++}
+ function registerPasskey(){return openFaceCamera();}
+-function dismissBiometric(){window.HRFaceCamera?.close();$('biometricPanel').hidden=true;}
++function dismissBiometric(){window.HRFaceCamera?.close();window.HRFaceLogin?.close();$('biometricPanel').hidden=true;}
+ async function offerPasskeySetup(){biometricSetupRequested=false;}
+ function passkeyCard(){return '<section id="passkeyCard" class="card"><h2>Face recognition</h2><p>Register, test or remove your encrypted face template using the camera.</p><p class="paynote">Face sign-in is awaiting validation. Attendance records dates, times and GPS, without face photos.</p><p id="passkeyListStatus" role="status" aria-live="polite">Checking face registration…</p><button type="button" class="btn" data-action="passkey-setup">Open face camera</button></section>';}
+ async function loadPasskeyStatus(){const startEpoch=epoch;let message;try{const data=await window.HRFaceCamera.status(sb,C);message=data.enrolled?'Your face is registered. You can test or remove it here.':'No face registered. Open the camera to register.';}catch{message='Could not check your face registration. Try again shortly.';}if(startEpoch===epoch&&pageName==='settings'&&$('passkeyListStatus'))$('passkeyListStatus').textContent=message;}
+--- a/v3/web/index.html
++++ b/v3/web/index.html
+@@ -1,5 +1,5 @@
+ <!doctype html>
+-<html lang="en"><head><meta charset="utf-8"><script src="auth-route.js"></script><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#14263d"><meta name="referrer" content="no-referrer"><meta name="description" content="Private Red Aluminium & Hardware employee HR portal"><title>Red Aluminium HR | Employee Portal</title><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icon-192.png"><link rel="stylesheet" href="app.css"><script src="visit-session.js?v=46"></script><script src="manual-session.js?v=46"></script></head>
++<html lang="en"><head><meta charset="utf-8"><script src="auth-route.js"></script><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#14263d"><meta name="referrer" content="no-referrer"><meta name="description" content="Private Red Aluminium & Hardware employee HR portal"><title>Red Aluminium HR | Employee Portal</title><link rel="manifest" href="manifest.webmanifest"><link rel="apple-touch-icon" href="icon-192.png"><link rel="stylesheet" href="app.css"><link rel="stylesheet" href="face-login.css"><script src="visit-session.js?v=46"></script><script src="manual-session.js?v=46"></script></head>
+ <body>
+ <header class="topbar"><div class="brand"><div class="brandmark" aria-hidden="true">HR</div><div><div class="brandname">RED ALUMINIUM & HARDWARE</div><div class="brandsub">Employee & Management Portal</div></div></div><div class="header-actions"><span id="connection" class="connection">Private access</span><button id="installBtn" hidden>Install</button><button id="settingsBtn" data-action="settings" hidden>Settings</button><button id="logoutBtn" data-action="logout" hidden>Sign out</button></div></header>
+ <div id="gpsBanner" class="gps-banner" hidden><span id="gpsLiveStatus" class="gps-status"></span> · Work location sharing<button class="btn small" data-action="gps-stop">Stop sharing</button></div>
+@@ -10,5 +10,5 @@
+ <dialog id="dialog" class="dialog"><div class="dialog-head"><h2 id="dialogTitle"></h2><button class="btn small" data-action="close-dialog" aria-label="Close dialog">Close</button></div><div id="dialogBody" class="dialog-body"></div></dialog>
+ <noscript>This application requires JavaScript and a secure connection. No attendance is recorded while JavaScript is disabled.</noscript>
+ <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0/dist/umd/supabase.js" defer></script><script src="config.js" defer></script><script src="domain.js" defer></script><script src="geo.js" defer></script><script src="payslip-pdf.js" defer></script><script src="organization.js" defer></script><script src="personal-file.js" defer></script>
+-<script src="face-camera.js" defer></script><script src="app.js" defer></script>
++<script src="face-camera.js" defer></script><script src="face-login.js" defer></script><script src="app.js" defer></script>
+ </body></html>
+--- a/v3/tests/controller.test.cjs
++++ b/v3/tests/controller.test.cjs
+@@ -17,8 +17,9 @@
+  const sb={auth,rpc:async(n,a)=>{calls.push([n,a]);if(rpcOverride)return rpcOverride(n,a);return {data:a.p_section==='workspace'?workspace:a.p_section==='admin'?{employees:[],leaves:[],requests:[],tasks:[],cases:[],branches:[],policies:[],audit:[]}:[]}}};
+  const ctx={console,URL,URLSearchParams,Intl,Date:class extends Date {static now(){return clock}},Map,Promise,performance:{getEntriesByType:()=>[{type:visit.type||'navigate'}]},sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},crypto:require('node:crypto').webcrypto,document:doc,navigator:{onLine:true,credentials:passkeys?{get(){},create(){}}:undefined},isSecureContext:true,PublicKeyCredential:passkeys?function PasskeyCredential(){}:undefined,location:{pathname:'/',search:'',hash:'',protocol:'https:',replace:v=>calls.push(['replace',v]),assign:v=>calls.push(['assign',v])},FormData:class{constructor(f){this.v=f.values}get(k){return this.v[k]}entries(){return Object.entries(this.v)[Symbol.iterator]()}[Symbol.iterator](){return this.entries()}},setTimeout:(fn,ms)=>{timers.set(++timerId,{fn,at:clock+ms});return timerId},clearTimeout:id=>timers.delete(id),setInterval(){},addEventListener:(k,f)=>(events['window:'+k]??=[]).push(f),supabase:{createClient:(_url,_key,options)=>{calls.push(['client',options]);return sb}}};ctx.window=ctx;vm.createContext(ctx);
+  ctx.AbortSignal=AbortSignal;ctx.AbortController=AbortController;
+- // The device adapter has separate tests using real WebAuthn option serialization.
++ // Camera lifecycle and exchange have separate synthetic contract tests.
+  ctx.HRFaceCamera={open:async options=>{ctx.faceOptions=options;calls.push(['face-camera']);},close:()=>{ctx.faceOptions?.onDone();ctx.faceOptions=null;},status:async()=>({enrolled:false})};
++ ctx.HRFaceLogin={open:options=>{ctx.faceLoginOptions=options;calls.push(['face-login']);},close:()=>{ctx.faceLoginOptions?.onDone();ctx.faceLoginOptions=null;}};
+  for(const method of ['startRegistration','verifyRegistration','startAuthentication','verifyAuthentication'])auth.passkey[method]=async()=>({});
+  ctx.Blob=Blob;
+  ctx.HRPayslipPDF={create:async p=>{calls.push(['pdf-create',p]);return new Uint8Array([37,80,68,70,45]);}};
+@@ -52,7 +53,7 @@
+  await settle();await f.click('phone-login');await f.submit('phoneSendForm',{phone:'0162337641',channel:'sms',consent:'on'});await f.submit('phoneVerifyForm',{code:'123456'});await f.click('login-page');
+  complete({status:200,body:{session:{access_token:'fixture-access',refresh_token:'fixture-refresh'}}});await settle();assert(!f.calls.some(c=>c[0]==='setSession'));assert.match(f.node('authCard').innerHTML,/Employee login/);
+ });
+-test('Face icon opens the camera independently of the password form',async()=>{const f=fixture('EMPLOYEE',false);await settle();f.node('f-email').value='fixture@example.invalid';f.node('f-password').value='fixture-password';await f.click('passkey-login');assert(f.calls.some(c=>c[0]==='face-camera'));assert(!f.calls.some(c=>['signIn','signInWithPasskey','registerPasskey'].includes(c[0])));assert.equal(f.node('appShell').hidden,true);assert.match(f.node('authCard').innerHTML,/data-action="toggle-password"/);});
++test('Face icon opens the camera independently of the password form',async()=>{const f=fixture('EMPLOYEE',false);await settle();f.node('f-email').value='fixture@example.invalid';f.node('f-password').value='fixture-password';await f.click('passkey-login');assert(f.calls.some(c=>c[0]==='face-login'));assert(!f.calls.some(c=>c[0]==='face-camera'));assert(!f.calls.some(c=>['signIn','signInWithPasskey','registerPasskey'].includes(c[0])));assert.equal(f.node('appShell').hidden,true);assert.match(f.node('authCard').innerHTML,/data-action="toggle-password"/);});
+ test('Email identifier submits to password authentication',async()=>{const f=fixture('EMPLOYEE',false);await settle();await f.submit('authForm',{email:'employee@example.invalid',password:'fixture-password'});assert(f.calls.some(c=>c[0]==='signIn'));assert.equal(f.node('appShell').hidden,false);});
+ test('Phone identifier enters backend-connected verification with the number retained',async()=>{const f=fixture('EMPLOYEE',false,{},false,async()=>({status:200,body:{channels:{sms:false,whatsapp:false,call:false}}}));await settle();await f.submit('authForm',{email:'0162337641',password:''});assert(f.calls.some(c=>c[0]==='phone'&&c[1]==='status'));assert(!f.calls.some(c=>c[0]==='signIn'));assert.match(f.node('authCard').innerHTML,/0162337641/);assert.match(f.node('authCard').innerHTML,/awaiting provider activation/);});
+ test('Registered login reaches own workspace; Settings works; Sign out clears private content',async()=>{const f=fixture('EMPLOYEE',false);await settle();await f.submit('authForm',{email:'fixture@example.invalid',password:'test-not-real'});assert.equal(f.node('appShell').hidden,false);await f.click('settings');assert.match(f.node('page').innerHTML,/changePasswordForm/);await f.click('logout');assert.equal(f.calls.filter(x=>x[0]==='signOut').length,1);assert.equal(f.node('page').innerHTML,'');assert.equal(f.node('nav').innerHTML,'');assert(f.node('logoutBtn').hidden);});
+@@ -149,11 +150,11 @@
+  assert(f.calls.some(c=>c[0]==='hr_read'&&c[1].p_section==='workspace'&&c[1].p_month==='2026-08-01'));
+ });
+ 
+-test('Face setup opens one camera dialog and duplicate taps are ignored',async()=>{const f=fixture('EMPLOYEE',false);await settle();await f.click('passkey-setup');await f.click('passkey-login');assert.equal(f.calls.filter(c=>c[0]==='face-camera').length,1);f.ctx.HRFaceCamera.close();await f.click('passkey-login');assert.equal(f.calls.filter(c=>c[0]==='face-camera').length,2);assert(f.node('appShell').hidden);});
+-test('Camera failure does not submit a password or block later manual login',async()=>{const f=fixture('EMPLOYEE',false);await settle();f.ctx.HRFaceCamera.open=async()=>{throw new Error('Camera unavailable')};await f.click('passkey-login');assert.match(f.node('toast').textContent,/Camera unavailable/);assert(!f.calls.some(c=>c[0]==='signIn'));await f.submit('authForm',{email:'fixture@example.invalid',password:'fixture-password'});assert.equal(f.node('appShell').hidden,false);});
++test('Face setup opens one camera dialog and duplicate taps are ignored',async()=>{const f=fixture('EMPLOYEE',false);await settle();await f.click('passkey-setup');await f.click('passkey-login');assert.equal(f.calls.filter(c=>c[0]==='face-camera').length,1);f.ctx.HRFaceCamera.close();await f.click('passkey-login');assert.equal(f.calls.filter(c=>c[0]==='face-login').length,1);assert(f.node('appShell').hidden);});
++test('Camera failure does not submit a password or block later manual login',async()=>{const f=fixture('EMPLOYEE',false);await settle();f.ctx.HRFaceLogin.open=()=>{throw new Error('Camera unavailable')};await f.click('passkey-login');assert.match(f.node('toast').textContent,/Camera unavailable/);assert(!f.calls.some(c=>c[0]==='signIn'));await f.submit('authForm',{email:'fixture@example.invalid',password:'fixture-password'});assert.equal(f.node('appShell').hidden,false);});
+ test('Signed-in settings opens camera without another setup screen or Authenticator',async()=>{let mfa=0;const f=fixture('EMPLOYEE',true,{listFactors:async()=>{mfa++;throw new Error('No MFA')}});await settle();await f.click('settings');await f.click('passkey-setup');assert.equal(f.calls.filter(c=>c[0]==='face-camera').length,1);assert.equal(mfa,0);assert.match(f.node('page').innerHTML,/Face sign-in is awaiting validation/);});
+ test('Signout closes camera and late continuation cannot enter HR',async()=>{const f=fixture('EMPLOYEE',true);await settle();await f.click('passkey-setup');const options=f.ctx.faceOptions;await f.signout();options.onContinue(true);await settle();assert.equal(f.ctx.faceOptions,null);assert(f.node('appShell').hidden);});
+-test('Password sign-in does not start a passkey ceremony or camera unexpectedly',async()=>{const f=fixture('EMPLOYEE',false);await settle();await f.submit('authForm',{email:'fixture@example.invalid',password:'fixture-password'});assert.equal(f.node('appShell').hidden,false);assert(!f.calls.some(c=>['face-camera','signInWithPasskey','registerPasskey'].includes(c[0])));});
++test('Password sign-in does not start a passkey ceremony or camera unexpectedly',async()=>{const f=fixture('EMPLOYEE',false);await settle();await f.submit('authForm',{email:'fixture@example.invalid',password:'fixture-password'});assert.equal(f.node('appShell').hidden,false);assert(!f.calls.some(c=>['face-camera','face-login','signInWithPasskey','registerPasskey'].includes(c[0])));});
+ 
+ test('Every new HR page starts signed out and never requests an employee workspace before manual login',async()=>{const f=fixture('DIRECTOR',false);await settle();assert.equal(f.calls.find(c=>c[0]==='client')[1].auth.persistSession,false);assert(!f.calls.some(c=>c[0]==='hr_read'));assert(f.node('appShell').hidden);await f.submit('authForm',{email:'fixture@example.invalid',password:'test-not-real'});assert.equal(f.node('appShell').hidden,false);});
+ test('Page close clears private HR content and history restore requires a fresh page',async()=>{const f=fixture('DIRECTOR');await settle();assert.equal(f.node('appShell').hidden,false);f.windowEvent('pagehide');assert(f.node('appShell').hidden);assert.equal(f.node('page').innerHTML,'');await settle();assert(f.calls.some(c=>c[0]==='stopAutoRefresh'));f.windowEvent('pageshow',{persisted:true});assert(f.calls.some(c=>c[0]==='replace'&&c[1]==='/'));});
+@@ -177,3 +178,17 @@
+  await f.click('master-delete',{id:'target'});assert.match(f.node('dialogBody').innerHTML,/history are retained/);assert(!f.calls.some(c=>c[0]==='hr_employee_master'));
+  await f.submit('dialogForm',{reason:'Left company'});assert(f.calls.some(c=>c[0]==='hr_employee_master'&&c[1].p_action==='delete'));
+ });
++
++test('Face-only completion enters HR after the camera exchange installs a verified session',async()=>{
++ const f=fixture('EMPLOYEE',false);await settle();await f.click('passkey-login');
++ const options=f.ctx.faceLoginOptions;assert(options);assert(!f.calls.some(c=>c[0]==='signIn'));
++ await options.client.auth.setSession({access_token:'synthetic-face-session',refresh_token:'synthetic-refresh'});
++ f.ctx.HRFaceLogin.close();options.onContinue(true);await settle();assert.equal(f.node('appShell').hidden,false);
++});
++test('Camera callback without a real session cannot open private HR content',async()=>{
++ const f=fixture('EMPLOYEE',false);await settle();await f.click('passkey-login');f.ctx.faceLoginOptions.onContinue(true);await settle();assert(f.node('appShell').hidden);assert.equal(f.node('page').innerHTML,'');
++});
++test('Changing login page cancels face flow and invalidates late continuation',async()=>{
++ const f=fixture('EMPLOYEE',false);await settle();await f.click('passkey-login');const options=f.ctx.faceLoginOptions;
++ await f.click('login-page');options.onContinue(true);await settle();assert.equal(f.ctx.faceLoginOptions,null);assert(f.node('appShell').hidden);
++});
+--- /dev/null
++++ b/v3/web/face-login.js
+@@ -0,0 +1,82 @@
++/* Hands-free login client. Activate only with the validated server exchange. */
++(() => {
++ 'use strict';
++ let active=null;
++ const stop=s=>s?.getTracks().forEach(t=>t.stop());
++ const fail=code=>Object.assign(new Error(code),{code});
++ const delay=(ms,signal)=>new Promise((resolve,reject)=>{
++  const abort=()=>{clearTimeout(timer);reject(new DOMException('Cancelled','AbortError'));};
++  const timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},ms);
++  signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();
++ });
++ const messages={face_login_not_enabled:'Face login is not available yet. Please use Sign in.',face_not_recognized:'Face not recognized. Keep your whole face visible.',face_one_person_required:'Keep only your face in view.',face_move_closer:'Move closer to the camera.',face_lighting_required:'Use better lighting and hold the phone steady.',face_capture_again:'Hold the phone steady.',face_capture_rejected:'Unable to verify your face. Please use Sign in.',face_rate_limited:'Too many attempts. Try again later.',face_unsteady:'Hold your phone steady and try again.',face_service_unavailable:'Face login is temporarily unavailable. Please use Sign in.'};
++ function explain(e){if(e.name==='NotAllowedError')return 'Allow camera access in your browser settings.';if(e.name==='NotFoundError')return 'No camera was found.';return messages[e.code]||'Unable to verify your face. Please use Sign in.';}
++ function capture(video){
++  if(video.readyState<2||!video.videoWidth||!video.videoHeight)throw fail('face_capture_again');
++  const canvas=document.createElement('canvas'),scale=Math.min(1,640/Math.max(video.videoWidth,video.videoHeight));
++  canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);
++  canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
++  try{const jpeg=canvas.toDataURL('image/jpeg',0.82).split(',')[1];if(!jpeg||jpeg.length>533336)throw fail('face_capture_again');return jpeg;}
++  finally{canvas.width=0;canvas.height=0;}
++ }
++ async function steady(video,signal){
++  const canvas=document.createElement('canvas');canvas.width=24;canvas.height=24;
++  const context=canvas.getContext('2d',{willReadFrequently:true});let previous=null,count=0;
++  try{for(let i=0;i<24;i++){
++   await delay(500,signal);if(video.readyState<2)continue;
++   context.drawImage(video,0,0,24,24);const pixels=context.getImageData(0,0,24,24).data;
++   if(previous){let change=0;for(let j=0;j<pixels.length;j+=4)change+=Math.abs(pixels[j]-previous[j])+Math.abs(pixels[j+1]-previous[j+1])+Math.abs(pixels[j+2]-previous[j+2]);
++    count=change/(24*24*3)<8?count+1:0;if(count>=3)return;}
++   previous=new Uint8ClampedArray(pixels);
++  }throw fail('face_unsteady');}finally{previous=null;canvas.width=0;canvas.height=0;}
++ }
++ function open({client,config,onContinue=()=>{},onDone=()=>{}}){
++  active?.close();const controller=new AbortController(),signal=controller.signal;
++  let stream=null,closed=false,session=null,keep=false,installed=false;
++  const dialog=document.createElement('dialog');dialog.className='face-dialog';dialog.setAttribute('aria-labelledby','faceLoginTitle');
++  dialog.innerHTML=`<div class="face-heading"><div><h2 id="faceLoginTitle">Face login</h2></div><button class="btn face-close" type="button">Close</button></div><div class="face-body"><div class="face-view"><video autoplay muted playsinline aria-label="Front camera preview"></video><span class="face-guide" aria-hidden="true"></span><span class="face-light" aria-hidden="true"></span></div><p class="face-feedback" role="status" aria-live="polite">Hold your phone steady and look at the camera.</p></div>`;
++  document.body.append(dialog);const video=dialog.querySelector('video'),feedback=dialog.querySelector('.face-feedback');
++  const show=(text,state='checking')=>{if(!closed){feedback.textContent=text;dialog.dataset.state=state;}};
++  const clear=()=>{stop(stream);stream=null;video.srcObject=null;};
++  async function discard(value){
++   if(!value?.access_token)return;
++   if(installed){await client.auth.signOut({scope:'local'}).catch(()=>{});return;}
++   await fetch(config.SUPABASE_URL+'/auth/v1/logout?scope=local',{method:'POST',credentials:'omit',cache:'no-store',signal:AbortSignal.timeout(10000),headers:{apikey:config.SUPABASE_PUBLISHABLE_KEY,Authorization:'Bearer '+value.access_token}}).catch(()=>{});
++  }
++  function close(){if(closed)return;closed=true;controller.abort();clear();window.removeEventListener('pagehide',close);document.removeEventListener('visibilitychange',hidden);dialog.close();dialog.remove();if(active?.close===close)active=null;if(!keep&&session)void discard(session);session=null;onDone();}
++  const hidden=()=>{if(document.hidden)close();};active={close};window.addEventListener('pagehide',close);document.addEventListener('visibilitychange',hidden);
++  dialog.querySelector('.face-close').onclick=close;dialog.addEventListener('cancel',e=>{e.preventDefault();close();});dialog.addEventListener('close',()=>{if(!closed)close();});
++  async function request(body){const r=await fetch(config.SUPABASE_URL+'/functions/v1/hr-face-login',{method:'POST',credentials:'omit',cache:'no-store',headers:{apikey:config.SUPABASE_PUBLISHABLE_KEY,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.any([signal,AbortSignal.timeout(45000)])});const value=await r.json();if(!r.ok)throw fail(value.error||'face_service_unavailable');return value;}
++  async function verify(){
++   if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw fail('face_service_unavailable');
++   const opened=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'user'},width:{ideal:640},height:{ideal:640}},audio:false});
++   if(closed){stop(opened);return;}stream=opened;video.srcObject=stream;await video.play();if(closed)return;
++   for(let attempt=0;attempt<3&&!closed;attempt++){
++    let frames=[];
++    try{
++     await steady(video,signal);const challenge=await request({action:'begin'});show('Checking your face…');
++     for(let i=0;i<3;i++){await delay(800,signal);frames.push(capture(video));}
++     const result=await request({action:'capture',id:challenge.id,proof:challenge.proof,frames});frames.fill('');
++     if(result.authenticated!==true||!result.session?.access_token||!result.session.refresh_token)throw fail('face_service_unavailable');
++     session=result.session;if(closed){await discard(session);session=null;return;}
++     const identity=await client.auth.getUser(session.access_token);if(closed)return;
++     if(identity.error||!identity.data.user?.id)throw fail('face_service_unavailable');
++     const value=session;const established=await client.auth.setSession(value);installed=true;
++     if(closed){await discard(value);return;}
++     if(established.error||established.data.user?.id!==identity.data.user.id)throw fail('face_service_unavailable');
++     show('Verified. Signing in…','verified');clear();await delay(650,signal);if(closed)return;
++     keep=true;close();onContinue(true);return;
++    }catch(e){
++     if(closed||e.name==='AbortError')return;
++     if(attempt<2&&['face_not_recognized','face_one_person_required','face_move_closer','face_lighting_required','face_capture_again'].includes(e.code)){show(explain(e));await delay(1200,signal);continue;}
++     throw e;
++    }finally{frames.fill('');frames=[];}
++   }
++  }
++  dialog.showModal();dialog.querySelector('.face-close').focus();
++  // Camera starts from the original tap; no nested Sign in or capture button.
++  void verify().catch(async e=>{clear();if(session&&!keep){await discard(session);session=null;}if(!closed&&e.name!=='AbortError')show(explain(e),'failed');});
++  return {close};
++ }
++ window.HRFaceLogin=Object.freeze({open,close:()=>active?.close()});
++})();
+--- /dev/null
++++ b/v3/web/face-login.css
+@@ -0,0 +1,5 @@
++.face-light{position:absolute;top:12px;right:12px;width:14px;height:14px;border-radius:50%;background:#d69a21;box-shadow:0 0 0 4px #ffffffaa}
++.face-dialog[data-state="verified"] .face-light{background:#13875d}
++.face-dialog[data-state="verified"] .face-guide{border:3px solid #20ae76}
++.face-dialog[data-state="verified"] .face-feedback{color:#08745d;background:#e9f7f1}
++.face-dialog[data-state="failed"] .face-light{background:#a82534}
