@@ -1,0 +1,53 @@
+-- Transaction-only synthetic records; always roll back. No actual face data.
+begin;
+do $$
+declare u uuid:=gen_random_uuid();v uuid:=gen_random_uuid();s uuid:=gen_random_uuid();s2 uuid:=gen_random_uuid();e uuid;c uuid;b uuid;
+ claims jsonb;j jsonb;job jsonb;r jsonb;denied boolean;template text:=repeat('synthetic-test-only-',20);
+begin
+ select company_id,branch_id into strict c,b from public.employees limit 1;
+ insert into auth.users(id) values(u),(v);
+ insert into auth.sessions(id,user_id,created_at,updated_at) values(s,u,now(),now()),(s2,u,now(),now());
+ insert into public.employees(employee_no,full_name,company_id,branch_id,auth_user_id,status)
+ values('FACE-ROLLBACK-'||u,'Synthetic rollback face test',c,b,u,'ACTIVE') returning id into e;
+ claims:=jsonb_build_object('sub',u,'session_id',s,'role','authenticated','amr',jsonb_build_array(jsonb_build_object('method','password','timestamp',extract(epoch from now()))));
+ perform set_config('request.jwt.claim.sub',u::text,true);perform set_config('request.jwt.claims',claims::text,true);
+ assert public.hr_face_self('status')->'enrolled'='false'::jsonb,'Starts unregistered';
+ denied:=false;begin perform public.hr_face_self('begin','{"purpose":"enroll"}');exception when others then denied:=sqlerrm='face_consent_required';end;assert denied,'Consent required';
+ perform set_config('request.jwt.claims',(claims||'{"amr":[]}'::jsonb)::text,true);
+ denied:=false;begin perform public.hr_face_self('begin','{"purpose":"enroll","consent":"face-enrollment-1"}');exception when others then denied:=sqlerrm='face_recent_signin_required';end;assert denied,'Fresh account proof required';
+ perform set_config('request.jwt.claims',claims::text,true);
+ j:=public.hr_face_self('begin','{"purpose":"enroll","consent":"face-enrollment-1"}');
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ denied:=false;begin perform public.hr_face_job('claim',v,(j->>'id')::uuid,jsonb_build_object('session_id',s));exception when others then denied:=sqlerrm='face_capture_expired';end;assert denied,'Another user cannot claim';
+ denied:=false;begin perform public.hr_face_job('claim',u,(j->>'id')::uuid,jsonb_build_object('session_id',s2));exception when others then denied:=sqlerrm='face_capture_expired';end;assert denied,'Another session cannot claim';
+ job:=public.hr_face_job('claim',u,(j->>'id')::uuid,jsonb_build_object('session_id',s));assert job->>'subject'=e::text,'Server owns subject';
+ denied:=false;begin perform public.hr_face_job('claim',u,(j->>'id')::uuid,jsonb_build_object('session_id',s));exception when others then denied:=sqlerrm='face_capture_used';end;assert denied,'Duplicate claim rejected';
+ r:=public.hr_face_job('finish',u,(j->>'id')::uuid,jsonb_build_object('receipt',job->>'receipt','quality_passed',true,'model_version','red-face-2026-09-v1','template',template));
+ assert r->>'result'='enrolled' and r->'authenticated'='false'::jsonb,'Registration is not login';
+ assert r->>'template' is null and r->>'access_token' is null,'No reference/session exposed';
+ denied:=false;begin perform public.hr_face_job('finish',u,(j->>'id')::uuid,jsonb_build_object('receipt',job->>'receipt'));exception when others then denied:=sqlerrm='face_capture_expired';end;assert denied,'Finish is one-use';
+ perform set_config('request.jwt.claims',claims::text,true);
+ assert public.hr_face_self('status')->'enrolled'='true'::jsonb,'Own status confirmed';
+ j:=public.hr_face_self('begin','{"purpose":"test"}');
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ job:=public.hr_face_job('claim',u,(j->>'id')::uuid,jsonb_build_object('session_id',s));assert job->>'template'=template,'Only backend gets reference';
+ r:=public.hr_face_job('finish',u,(j->>'id')::uuid,jsonb_build_object('receipt',job->>'receipt','quality_passed',true,'candidate_match',true,'model_version','red-face-2026-09-v1'));
+ assert r->>'result'='test_match' and r->'login_enabled'='false'::jsonb,'Evaluation cannot log in';
+ perform set_config('request.jwt.claims',claims::text,true);j:=public.hr_face_self('begin','{"purpose":"test"}');
+ perform public.hr_face_self('revoke');assert public.hr_face_self('status')->'enrolled'='false'::jsonb,'Registration removed';
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ denied:=false;begin perform public.hr_face_job('claim',u,(j->>'id')::uuid,jsonb_build_object('session_id',s));exception when others then denied:=sqlerrm='face_capture_expired';end;assert denied,'Revoke invalidates pending capture';
+ perform set_config('request.jwt.claims',claims::text,true);
+ assert (select count(*)=3 from hr_face_private.capture_events where user_id=u and action='capture_started'),'Revoke preserves rate counter';
+ j:=public.hr_face_self('begin','{"purpose":"enroll","consent":"face-enrollment-1"}');delete from auth.sessions where id=s;
+ denied:=false;begin perform public.hr_face_self('status');exception when insufficient_privilege then denied:=true;end;assert denied,'Revoked session denied';
+ perform set_config('request.jwt.claims','{"role":"service_role"}',true);
+ denied:=false;begin perform public.hr_face_job('claim',u,(j->>'id')::uuid,jsonb_build_object('session_id',s));exception when others then denied:=sqlerrm='face_capture_expired';end;assert denied,'Backend rejects revoked session';
+ assert not has_table_privilege('authenticated','hr_face_private.enrollments','SELECT'),'No template read';
+ assert not has_table_privilege('authenticated','hr_face_private.enrollments','INSERT'),'No direct registration';
+ assert not has_function_privilege('anon','public.hr_face_self(text,jsonb)','EXECUTE'),'No anonymous access';
+ assert not has_function_privilege('authenticated','public.hr_face_job(text,uuid,uuid,jsonb)','EXECUTE'),'No user completion/claim';
+ assert not has_function_privilege('authenticated','public.hr_face_service_config()','EXECUTE'),'No key read';
+end $$;
+rollback;
+select 'Face enrollment lifecycle, consent, account proof, ownership, replay, revoke and privilege checks passed; all fixtures rolled back' as result;

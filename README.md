@@ -9,8 +9,9 @@ pinned upstream sources **at build time** and verified before every startup.
 This release never issues a Supabase session. Every inference response includes
 `authenticated: false`; `/readyz` includes `login_enabled: false`.
 There is deliberately no configuration switch to turn measurements into login.
-Employee enrollment, live challenge capture, Supabase session exchange, revocation,
-and device-specific genuine-user/spoof evaluation remain release gates.
+Authenticated employee enrollment, encrypted storage, one-use capture jobs and
+revocation are implemented. Device-specific genuine-user/spoof evaluation, active
+challenge validation and Supabase session exchange remain release gates.
 
 The model weights are licensed pretrained open-source weights, not a new
 proprietary model trained on employee faces. See `THIRD_PARTY_NOTICES.md` and
@@ -114,42 +115,60 @@ Frames and embeddings are neither logged nor written to disk. Turn off upstream
 request-body logging, tracing payload capture, error-session replay and proxy
 body storage as well. Attendance stores date/time/GPS only, without face photos.
 
-## Remaining Supabase / HR release work
+## Employee camera registration and testing
 
-1. Authenticate the employee with an existing trusted method before first
-   enrollment, validate that the employee is active and the session is current,
-   and record explicit biometric enrollment consent. Do not bind by typed email
-   alone or trust user-editable JWT metadata.
-2. Store sealed templates, enrollment version, consent time and revocation state
-   in a private schema. Deny `anon`/`authenticated` direct access. Audit access
-   without images or plaintext vectors; implement retention and deletion.
-3. Add a server-issued, expiring, one-time capture challenge with a randomized
-   action sequence and server-side sequence checking. Persist attempts and
-   consumption atomically; rate-limit by account and request source. Reject
-   replayed requests and never trust client liveness booleans.
-4. Provide a front-camera UI using `getUserMedia({video:{facingMode:'user'},audio:false})`.
-   Camera access still requires the browser's permission. Stop all tracks when
-   done, cancelled or navigating away. This is camera verification, not Apple's
-   hardware Face ID or WebAuthn. Do not trigger the password form from its button.
-5. Measure genuine accepts/rejects and printed-photo, display/video replay,
-   lookalike and injected-video attacks on the actual supported devices. The
-   defaults (cosine 0.65 / both PAD scores 0.99) are **unvalidated evaluation
-   thresholds**, not measured false-accept rates. PAD scores are not proof of
-   physical presence and a browser camera is not a trusted capture path.
-6. Only after those gates, add a separately reviewed Supabase session exchange
-   that rechecks employee status and consumes the successful challenge exactly
-   once. Preserve password recovery; do not bypass existing account controls.
-   No TOTP/Authenticator step is part of the proposed face login flow.
+`integration/hr-face-enrollment.sql` adds private encrypted registrations,
+90-second capture jobs and image-free audit events. `hr_face_self` permits only
+an active employee with a live Supabase session to view their registration status,
+start a capture or revoke their own registration. First enrollment also requires
+password/OTP verification within 10 minutes and explicit consent version
+`face-enrollment-1`. Normal employees cannot directly read or write templates.
 
-No production employee rows, Auth factors or attendance tables are modified by
-this repository.
+`integration/hr-face-enrollment/index.ts` is the `hr-face-enrollment` Edge Function,
+deployed **with JWT verification enabled**. It derives the user and session from
+the validated employee context, then claims the job using service-only RPCs.
+The browser cannot choose another employee, provide reference templates, or
+supply match/liveness results. Claims are one-use; status, session ownership and
+registration revision are rechecked before completion. Removing a registration
+invalidates pending captures without clearing the attempt rate counter.
+
+The HR Site camera button now opens `getUserMedia` directly from the click, with
+front-facing preference and no audio. The old WebAuthn adapter is no longer loaded.
+The camera dialog supports employee account verification, consent, registration,
+matching tests and registration removal. Raw camera frames remain in memory,
+travel only to the private HR backend/model service, and are discarded. Camera
+tracks stop on completion, cancellation, navigation and backgrounding. This is
+browser camera recognition, not Apple's hardware Face ID. The browser still
+requires camera permission. A recognition test never signs the employee in;
+entering HR here requires an explicitly verified password session.
+
+Apply the enrollment SQL after `integration/supabase-service.sql`. Audit metadata
+is retained for 90 days and capture jobs for one day, with cleanup on new capture
+requests. A registration persists until its owner removes it or the related Auth
+user/employee is deleted. At most 5 captures per employee per 5 minutes and 30
+captures across the service per minute are accepted. Revocation is also limited
+and never resets capture limits. No changes are made to attendance or Auth factors.
+
+## Remaining release work
+
+1. Validate randomized action challenges on the server, with replay/injection
+   handling. Current captures are one-use jobs with passive PAD, not a trusted
+   camera channel or validated active-liveness challenge.
+2. Measure genuine accepts/rejects and printed-photo, display/video replay,
+   lookalike and injected-video attacks on supported real devices. The defaults
+   (cosine 0.65 / both PAD scores 0.99) are **unvalidated evaluation thresholds**.
+   PAD scores are not measured false-accept rates or proof of physical presence.
+3. After those measurements support release, add a reviewed Supabase session
+   exchange that rechecks employee status and consumes a successful challenge
+   exactly once. Preserve password recovery and account controls. No
+   TOTP/Authenticator step is part of the proposed face login flow.
 
 ## Tests
 
 ```sh
 .venv/bin/pip install -r requirements-test.lock
 .venv/bin/python -m pytest -q
-node --test tests/supabase-service-check.test.mjs
+node --test tests/supabase-service-check.test.mjs tests/face-enrollment-edge.test.mjs
 ```
 
 Tests cover signature tampering/replay/expiry, subject-bound template encryption,
@@ -163,3 +182,9 @@ with the HMAC key supplied on standard input from your secret manager. It sends
 only synthetic blank images and diagnostic payloads. Do not put the key into
 command-line arguments, a committed file or logs. A successful run reports ten
 checks and `login_enabled: false`.
+
+The enrollment Edge Function has nine synthetic HTTP contract tests. The SQL
+regression in `tests/face-enrollment-db.sql` runs consent, fresh account proof,
+ownership/session isolation, one-use completion, revocation and privilege tests
+inside a transaction and rolls back all synthetic fixtures. It passed against the
+existing HR database on 2026-09-11. These tests do not use employee face images.
