@@ -9,12 +9,40 @@ pinned upstream sources **at build time** and verified before every startup.
 This release never issues a Supabase session. Every inference response includes
 `authenticated: false`; `/readyz` includes `login_enabled: false`.
 There is deliberately no configuration switch to turn measurements into login.
-Employee enrollment, live challenge capture, Supabase integration, revocation,
+Employee enrollment, live challenge capture, Supabase session exchange, revocation,
 and device-specific genuine-user/spoof evaluation remain release gates.
 
 The model weights are licensed pretrained open-source weights, not a new
 proprietary model trained on employee faces. See `THIRD_PARTY_NOTICES.md` and
 `licenses/` for provenance and license texts.
+
+## Deployed service and Supabase connection
+
+The Railway service is deployed at
+`https://face-verifier-api-production.up.railway.app`. Public readiness is available
+at `/readyz`; inference endpoints require a signed backend request.
+
+`integration/supabase-service.sql` defines service-role-only configuration and
+probe nonce functions, with a private RLS-protected nonce table. The signing key
+and URL are stored as Supabase Vault secrets named `red_hr_face_service_hmac` and
+`red_hr_face_service_url`. Secret values are not part of this repository. Do not
+grant employee or anonymous roles access to these functions or Vault secrets.
+
+`integration/hr-face-service-check/index.ts` is deployed as the Supabase Edge
+Function `hr-face-service-check`. It uses custom HMAC authentication (therefore
+gateway JWT verification is disabled), rejects replay, and permits at most six
+accepted probes per minute. Its only input is `{"operation":"probe"}`. It cannot
+relay employee images, reference templates or arbitrary URLs. Sign requests with
+the path `/hr-face-service-check`, as received by the Edge Function.
+
+The diagnostic verifies readiness and sends a signed empty-capture request to
+the Railway validation layer. A positive result confirms the backend connection
+and signing configuration; it does not validate an employee or issue a session.
+
+On 2026-09-11, all ten live deployment checks passed: model readiness, rejection
+of unsigned/modified/expired/replayed requests, actual model rejection of blank
+synthetic captures, and the signed Supabase-to-Railway round trip. Employee face
+accuracy and spoof-resistance have not been measured.
 
 ## Running the backend
 
@@ -121,6 +149,7 @@ this repository.
 ```sh
 .venv/bin/pip install -r requirements-test.lock
 .venv/bin/python -m pytest -q
+node --test tests/supabase-service-check.test.mjs
 ```
 
 Tests cover signature tampering/replay/expiry, subject-bound template encryption,
@@ -128,3 +157,9 @@ image/request limits, unsigned clients, injected result fields and the rule that
 evaluation is never login authorization. A real-model smoke test loads all four
 downloaded models and rejects blank images. Mock measurements are used for API
 contract tests; they are not evidence of face-recognition or anti-spoof accuracy.
+
+For an authorized deployment check, run `.venv/bin/python scripts/live_probe.py`
+with the HMAC key supplied on standard input from your secret manager. It sends
+only synthetic blank images and diagnostic payloads. Do not put the key into
+command-line arguments, a committed file or logs. A successful run reports ten
+checks and `login_enabled: false`.
