@@ -1,0 +1,20 @@
+name: Protected face runtime
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  preserve-stable-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Compare runtime with accepted deployment
+        env:
+          REPOSITORY: ${{ github.repository }}
+          CANDIDATE: ${{ github.sha }}
+          BASELINE: a90dcb87bb82ff689015b9c586f837a00a0a25cd
+        run: |
+          set -eu
+          git init source
+          git -C source remote add origin "https://github.com/${REPOSITORY}.git"
+          git -C source fetch --no-tags --depth=1 origin "$BASELINE" "$CANDIDATE"
+          git -C source diff --exit-code "$BASELINE" "$CANDIDATE" -- service models.lock.json requirements.lock scripts/fetch_models.py Dockerfile railway.toml .dockerignore
