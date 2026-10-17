@@ -17,4 +17,5 @@ jobs:
           git init source
           git -C source remote add origin "https://github.com/${REPOSITORY}.git"
           git -C source fetch --no-tags --depth=1 origin "$BASELINE" "$CANDIDATE"
-          git -C source diff --exit-code "$BASELINE" "$CANDIDATE" -- service models.lock.json requirements.lock scripts/fetch_models.py Dockerfile railway.toml .dockerignore
+          git -C source checkout --detach "$CANDIDATE"
+          python source/scripts/check_customer_scope.py
